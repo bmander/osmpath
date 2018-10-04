@@ -8,7 +8,7 @@ setuptools.setup(
     author_email="badhill@gmail.com",
 
     description="Shortest paths using OpenStreetMap.",
-    long_description=open('README.rst').read(),
+    long_description=open('README.md').read(),
 
     packages=setuptools.find_packages(),
 
