@@ -1,4 +1,4 @@
-osmshrtpath
+osmpath
 ===========
 
 Shortest paths using OpenStreetMap.
@@ -6,4 +6,4 @@ Shortest paths using OpenStreetMap.
 Authors
 -------
 
-`osmshrtpath` was written by `Brandon Martin-Anderson <badhill@gmail.com>`_.
+`osmpath` was written by `Brandon Martin-Anderson <badhill@gmail.com>`_.

@@ -1,7 +1,7 @@
 import setuptools
 
 setuptools.setup(
-    name="osmshrtpath",
+    name="osmpath",
     version="0.1.0",
 
     author="Brandon Martin-Anderson",
