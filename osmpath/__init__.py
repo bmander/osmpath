@@ -44,11 +44,14 @@ class OSM:
         return vertex_nodes
 
     @classmethod
-    def parse(cls, filename, way_filter=None):
+    def parse(cls, filename, way_filter=None, verbose=False):
         ret = cls()
 
         referenced_nodes = set()
-        for _, entity in enumerate( parse_file(filename) ):
+        for i, entity in enumerate( parse_file(filename) ):
+            if verbose:
+                if i%100000==0:
+                    print( "{} entities read".format(i) )
             
             if isinstance( entity, Node ):
                 ret.nodes[ entity.id ] = (entity.lon, entity.lat)
