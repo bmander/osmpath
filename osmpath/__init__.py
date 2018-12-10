@@ -18,36 +18,26 @@ def geo_len(pts):
     pair_len = lambda pt0, pt1: geod.inv( pt0[0], pt0[1], pt1[0], pt1[1] )[2]
     return sum([pair_len(x,y) for (x,y) in cons(pts)])
 
-class OSM:
+class Graph:
+    def __init__(self):
+        pass
+
+class OSMGraphParser:
     def __init__(self):
         self.nodes = {}
         self.ways = {}
-
-    @classmethod
-    def _find_vertex_nodes(cls, highways):
-        endpoint_nodes = set()
-
-        vcount = Counter()
-
-        for highway in highways:
-            endpoint_nodes.add( highway.nodes[0] )
-            endpoint_nodes.add( highway.nodes[-1] )
-
-            # keep a running total of how many times nodes appear
-            vcount.update( highway.nodes )
-
-        # nodes that appear more than once are intersection nodes
-        intersection_nodes = {vid for (vid, ct) in vcount.items() if ct>1}
-
-        vertex_nodes = intersection_nodes | endpoint_nodes
-
-        return vertex_nodes
+        self.vertex_nodes = set()
 
     @classmethod
     def parse(cls, filename, way_filter=None, verbose=False):
         ret = cls()
 
-        referenced_nodes = set()
+        referenced_nodes = Counter()
+
+        # while we're parsing the file, it's easy to keep track of the OSM
+        # nodes that correspond to graph vertices
+        ret.vertex_nodes = set()
+
         for i, entity in enumerate( parse_file(filename) ):
             if verbose:
                 if i%100000==0:
@@ -62,19 +52,22 @@ class OSM:
                 ret.ways[ entity.id ] = entity
                 referenced_nodes.update( entity.nodes )
 
+                ret.vertex_nodes.add( entity.nodes[0] )
+                ret.vertex_nodes.add( entity.nodes[-1] )
+
         # filter nodes to those referenced by a way
         ret.nodes = {ndid:node for ndid,node in ret.nodes.items() if ndid in referenced_nodes}
+
+        ret.vertex_nodes.update( [nd for nd,ct in referenced_nodes.items() if ct>1] )
 
         return ret
 
     def get_edges(self):
         edges = []
 
-        vertex_nodes = self._find_vertex_nodes( self.ways.values() )
-
         for highway in self.ways.values():
             
-            for i, seg in enumerate( chop(highway.nodes, vertex_nodes) ):
+            for i, seg in enumerate( chop(highway.nodes, self.vertex_nodes) ):
                 pts = [self.nodes[nd] for nd in seg]
                 
                 fromv = seg[0]
