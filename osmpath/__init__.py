@@ -63,18 +63,26 @@ class OSMGraphParser:
         return ret
 
     def get_edges(self):
+        """Returns: edge tuples with format `(vertex1, vertex2, edge)`. Each vertex
+        is an OSM node id. The `edge` object is a tuple with format `(edge_spec, dist)`,
+        where `dist` is the edge distance in meters. `edge_spec` is unique tuple,
+        with the format `(way_id, (index0, index1))` where way_id is a valid
+        OSM way ID, index0 is the index of the first node in the edge, and
+        index1 is the **inclusive** index of the last node in the edge."""
+
         edges = []
 
         for highway in self.ways.values():
             
-            for i, seg in enumerate( chop(highway.nodes, self.vertex_nodes) ):
-                pts = [self.nodes[nd] for nd in seg]
+            for j0, j1 in chop(highway.nodes, self.vertex_nodes):
+                nds = highway.nodes[j0:j1+1]
+                pts = [self.nodes[nd] for nd in nds]
                 
-                fromv = seg[0]
-                tov = seg[-1]
+                fromv = highway.nodes[j0]
+                tov = highway.nodes[j1]
                 seglen = geo_len(pts)
-                edge_id_forward = (highway.id,i+1)
-                edge_id_backward = (highway.id,-(i+1))
+                edge_id_forward = (highway.id,(j0,j1))
+                edge_id_backward = (highway.id,(j1,j0))
                 
                 edges.append( (fromv, tov, (edge_id_forward, seglen) ) )
                 if not is_oneway(highway):

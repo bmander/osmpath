@@ -1,17 +1,13 @@
 def chop(ary, endpoints):
-    """Returns a generator of segments of `ary` bounded by values `endpoints`.
+    """Returns inclusive slice indices of segments of `ary` bounded by values `endpoints`.
 
-    For example: `chop([1,2,3,4,5,6,7], [2,5,7])` -> `[[2,3,4,5],[5,6,7]]`
+    For example: `chop([1,2,3,4,5,6,7], [2,5,7])` -> `[(1,4),(4,6)]`
     """
 
-    i_beg = None
-    
-    for i, el in enumerate(ary):
-        if el in endpoints:
-            if i_beg is not None:
-                yield ary[i_beg:i+1]
-                
-            i_beg = i
+    # ary indices that are endpoints
+    ix = [i for i,item in enumerate(ary) if item in endpoints]
+
+    return [(i0, i1) for i0, i1 in cons(ix)]
 
 def cons(ary):
     """Returns all pairs of consecutive items in `ary`"""
