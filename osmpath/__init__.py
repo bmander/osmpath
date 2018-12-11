@@ -4,6 +4,10 @@ from osmread import parse_file, Way, Node
 from collections import Counter
 import pyproj
 from .util import cons, chop
+import numpy as np
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
+import json
 
 __version__ = '0.1.0'
 __author__ = 'Brandon Martin-Anderson <badhill@gmail.com>'
@@ -19,8 +23,31 @@ def geo_len(pts):
     return sum([pair_len(x,y) for (x,y) in cons(pts)])
 
 class Graph:
-    def __init__(self):
-        pass
+    def __init__(self, edges):
+        # set of all node ids
+        nds = set([x[0] for x in edges]) | set([x[1] for x in edges])
+
+        # node id -> index lookup
+        i_nd = dict( zip(nds, range(len(nds))) )
+        # index -> node id lookup
+        nd_i = {v:k for k,v in i_nd.items()}
+
+        # distance matrix
+        dist = csr_matrix((len(nds),len(nds)))
+        i = np.vectorize(i_nd.get)( [x[0] for x in edges] )
+        j = np.vectorize(i_nd.get)( [x[1] for x in edges] )
+        weight = [edge[1] for _, _, edge in edges]
+        dist[i,j] = weight
+
+        # edge details directory
+        edge_details = {}
+        for fromv, tov, edge in edges:
+            edge_details[(fromv,tov)] = edge
+
+        self.i_nd = i_nd
+        self.nd_i = nd_i
+        self.dist = dist
+        self.edges = edge_details
 
 class OSMGraphParser:
     def __init__(self):
@@ -62,7 +89,7 @@ class OSMGraphParser:
 
         return ret
 
-    def get_edges(self):
+    def _get_edges(self):
         """Returns: edge tuples with format `(vertex1, vertex2, edge)`. Each vertex
         is an OSM node id. The `edge` object is a tuple with format `(edge_spec, dist)`,
         where `dist` is the edge distance in meters. `edge_spec` is unique tuple,
@@ -89,6 +116,41 @@ class OSMGraphParser:
                     edges.append( (tov, fromv, (edge_id_backward, seglen) ) )
 
         return edges
+
+    def serialize(self, fn):
+        edges = self._get_edges()
+
+        geoms = {}
+        for way in self.ways.values():
+            pts = np.array([self.nodes[x] for x in way.nodes])
+            pts = (pts*1e7).astype(int)
+            
+            firstrow = pts[0:1,:]
+            diffs = np.diff( pts, axis=0 )
+            geoms[way.id] = np.vstack( [firstrow, diffs] ).tolist()
+
+        vertex_coords = [(k,v) for k,v in self.nodes.items() if k in self.vertex_nodes]
+
+        with open(fn,"w") as fp:
+            json.dump({"edges":edges, "geoms":geoms, 'nodes':vertex_coords}, fp)
+
+    @classmethod
+    def deserialize(self, fn):
+        with open(fn) as fp:
+            data = json.load(fp)
+            graph = Graph(data["edges"])
+            geoms = data["geoms"]
+            geoms = {k:np.array(v).cumsum(axis=0)/1e7 for k,v in geoms.items()}
+            nodes = data["nodes"]
+
+            return geoms, nodes, graph
+
+    def get_graph(self):
+        edges = self._get_edges()
+        return Graph(edges)
+
+
+
 
 
 
