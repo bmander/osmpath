@@ -105,33 +105,6 @@ class SpatialIndex:
         dists, ix = self.tree.query( points )
         return dists, [self.ix_id[x] for x in ix]
 
-class Fiz:
-    def __init__(self, edges):
-        # set of all node ids
-        nds = set([x[0] for x in edges]) | set([x[1] for x in edges])
-
-        # node id -> index lookup
-        i_nd = dict( zip(nds, range(len(nds))) )
-        # index -> node id lookup
-        nd_i = {v:k for k,v in i_nd.items()}
-
-        # distance matrix
-        dist = csr_matrix((len(nds),len(nds)))
-        i = np.vectorize(i_nd.get)( [x[0] for x in edges] )
-        j = np.vectorize(i_nd.get)( [x[1] for x in edges] )
-        weight = [edge[1] for _, _, edge in edges]
-        dist[i,j] = weight
-
-        # edge details directory
-        edge_details = {}
-        for fromv, tov, edge in edges:
-            edge_details[(fromv,tov)] = edge
-
-        self.i_nd = i_nd
-        self.nd_i = nd_i
-        self.dist = dist
-        self.edges = edge_details
-
 class OSMPathPlanner:
 
     @classmethod
@@ -206,8 +179,9 @@ class OSMPathPlanner:
         return cls(nodes, ways, edges)
 
     def __init__(self, nodes, ways, edges):
-        self.nodes = nodes
-        self.ways = ways
+        # node keys are integers, but json keys are strings; ungarble them
+        self.nodes = {int(k):v for k,v in nodes.items()}
+        self.ways = {int(k):Way(*v) for k,v in ways.items()}
         self.edges = edges
 
         self.edge_index = {(a,b):c for a,b,(c,_) in edges}
@@ -233,6 +207,47 @@ class OSMPathPlanner:
 
             ret = cls(nodes, ways, edges)
             return ret
+
+    def _vertex_pairs_to_edges(self, vertex_path):
+        ret = []
+        for vpair in cons(vertex_path):
+            ret.append( self.edge_index[vpair] )
+        return ret
+
+    def get_shortest_paths(self, orig, dest):
+        # convert locations to vertex ids
+        _, orig_vids = self.index.query( orig )
+        _, dest_vids = self.index.query( dest )
+
+        assert len(orig_vids) == len(dest_vids)
+
+        unique_orig_vids = list(set(orig_vids))
+        spts = self.graph.get_shortest_paths(unique_orig_vids)
+
+        for o, d in zip(orig_vids, dest_vids):
+            vertex_path = spts.get_path(o,d)
+            yield self._vertex_pairs_to_edges( vertex_path )
+
+    def get_edge_geom( self, edge ):
+        way_id, (ix1, ix2) = edge
+
+        assert ix1 != ix2
+
+        # nd_ix is the inclusive indices of the segment to slice from the
+        # way.
+        if ix2 > ix1:
+            segslice = slice(ix1, ix2+1)
+        else:
+            if ix2==0:
+                segslice = slice(ix1, None, -1)
+            else:
+                segslice = slice(ix1, ix2-1, -1)
+        
+        nds = self.ways[way_id].nodes[segslice]
+        return np.array( [self.nodes[nd] for nd in nds] )
+
+    def get_path_geom( self, path ):
+        return np.vstack( [self.get_edge_geom( x ) for x in path] )
 
 
 if __name__=='__main__':
