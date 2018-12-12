@@ -5,7 +5,7 @@ from collections import Counter
 import pyproj
 from .util import cons, chop
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, dok_matrix
 from scipy.sparse.csgraph import dijkstra
 import json
 
@@ -22,7 +22,80 @@ def geo_len(pts):
     pair_len = lambda pt0, pt1: geod.inv( pt0[0], pt0[1], pt1[0], pt1[1] )[2]
     return sum([pair_len(x,y) for (x,y) in cons(pts)])
 
+class ShortestPaths:
+    def __init__(self, graph, origins, preds):
+        self.graph = graph
+        self.preds = preds
+
+        self.orig_ix = dict(zip(origins, range(len(origins))))
+
+    def get_path(self, orig, dest):
+        i = self.orig_ix[orig]
+        spt = self.preds[i]
+
+        path = [self.graph.vid_ix[dest]]
+
+        # if the previous-vertex entry for the destination vertex
+        # is negative, it means it wasn't reached
+        if spt[ path[-1] ]<0:
+            return None
+
+        while True:
+            last = spt[ path[-1] ]
+            if last<0:
+                break
+            path.append( last )
+        
+        return [self.graph.ix_vid[x] for x in reversed(path)]
+
 class Graph:
+    def __init__(self, edges):
+        """
+        Args:
+            edges (list): List of tuples, with format `(from_vertex, to_vertex, 
+                weight)`. `from_vertex` and `to_vertex` can be any hashable
+                object. `weight` is a number.
+        """
+
+        # transpose edge list into columns
+        orig = [edge[0] for edge in edges]
+        dest = [edge[1] for edge in edges]
+        weights = [edge[2] for edge in edges]
+
+        # convert vertex ids into matrix indices
+        # sorted for the sake of consistency
+        # it imposes some cost, but the graph should be small enough such that
+        # O(n*log n) is easy, so this should be fine.
+        vertex_ids = sorted(list( set(orig) | set(dest) ))
+
+        self.vid_ix = dict(zip(vertex_ids, range(len(vertex_ids))))
+        self.ix_vid = {v:k for k,v in self.vid_ix.items()}
+
+        ii = [self.vid_ix[vid] for vid in orig]
+        jj = [self.vid_ix[vid] for vid in dest]
+
+        # build matrix
+        n = len(vertex_ids)
+        mat = dok_matrix((n,n))
+        mat[ii,jj] = weights
+
+        # compress before returning
+        self.mat = mat.tocsr()
+
+    def get_shortest_paths(self, origins):
+        """
+        Args:
+            origins (list): List of vertex ids.
+        Returns:
+            shortest path tree object
+        """
+
+        orig_ix = [self.vid_ix[x] for x in origins]
+        _, preds = dijkstra( self.mat, indices=orig_ix, return_predecessors=True)
+
+        return ShortestPaths(self, origins, preds)
+
+class Fiz:
     def __init__(self, edges):
         # set of all node ids
         nds = set([x[0] for x in edges]) | set([x[1] for x in edges])
@@ -49,14 +122,14 @@ class Graph:
         self.dist = dist
         self.edges = edge_details
 
-class OSMGraphParser:
+class OSMPathPlanner:
     def __init__(self):
         self.nodes = {}
         self.ways = {}
         self.vertex_nodes = set()
 
     @classmethod
-    def parse(cls, filename, way_filter=None, verbose=False):
+    def from_osm(cls, filename, way_filter=None, verbose=False):
         ret = cls()
 
         referenced_nodes = Counter()
@@ -150,7 +223,7 @@ class OSMGraphParser:
         return Graph(edges)
 
 
-
-
-
-
+if __name__=='__main__':
+    gg = Graph([("a", "b", 1), ("b", "c", 2), ("a", "c", 2)])
+    spts = gg.get_shortest_paths(['a','b'])
+    spts.get_path("b","a")
