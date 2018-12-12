@@ -8,6 +8,7 @@ import numpy as np
 from scipy.sparse import csr_matrix, dok_matrix
 from scipy.sparse.csgraph import dijkstra
 import json
+from scipy.spatial import KDTree
 
 __version__ = '0.1.0'
 __author__ = 'Brandon Martin-Anderson <badhill@gmail.com>'
@@ -95,6 +96,15 @@ class Graph:
 
         return ShortestPaths(self, origins, preds)
 
+class SpatialIndex:
+    def __init__(self, ids, points):
+        self.ix_id = dict(zip( range(len(ids)), ids ))
+        self.tree = KDTree(points)
+
+    def query(self, points):
+        dists, ix = self.tree.query( points )
+        return dists, [self.ix_id[x] for x in ix]
+
 class Fiz:
     def __init__(self, edges):
         # set of all node ids
@@ -123,20 +133,16 @@ class Fiz:
         self.edges = edge_details
 
 class OSMPathPlanner:
-    def __init__(self):
-        self.nodes = {}
-        self.ways = {}
-        self.vertex_nodes = set()
 
     @classmethod
-    def from_osm(cls, filename, way_filter=None, verbose=False):
-        ret = cls()
-
+    def _parse_osm(cls, filename, way_filter=None, verbose=False):
         referenced_nodes = Counter()
 
         # while we're parsing the file, it's easy to keep track of the OSM
         # nodes that correspond to graph vertices
-        ret.vertex_nodes = set()
+        vertex_nodes = set()
+        nodes = {}
+        ways = {}
 
         for i, entity in enumerate( parse_file(filename) ):
             if verbose:
@@ -144,25 +150,26 @@ class OSMPathPlanner:
                     print( "{} entities read".format(i) )
             
             if isinstance( entity, Node ):
-                ret.nodes[ entity.id ] = (entity.lon, entity.lat)
+                nodes[ entity.id ] = (entity.lon, entity.lat)
             elif isinstance( entity, Way ):
                 if way_filter and not way_filter(entity):
                     continue
                     
-                ret.ways[ entity.id ] = entity
+                ways[ entity.id ] = entity
                 referenced_nodes.update( entity.nodes )
 
-                ret.vertex_nodes.add( entity.nodes[0] )
-                ret.vertex_nodes.add( entity.nodes[-1] )
+                vertex_nodes.add( entity.nodes[0] )
+                vertex_nodes.add( entity.nodes[-1] )
 
         # filter nodes to those referenced by a way
-        ret.nodes = {ndid:node for ndid,node in ret.nodes.items() if ndid in referenced_nodes}
+        nodes = {ndid:node for ndid,node in nodes.items() if ndid in referenced_nodes}
 
-        ret.vertex_nodes.update( [nd for nd,ct in referenced_nodes.items() if ct>1] )
+        vertex_nodes.update( [nd for nd,ct in referenced_nodes.items() if ct>1] )
 
-        return ret
+        return ways, nodes, vertex_nodes
 
-    def _get_edges(self):
+    @classmethod
+    def _get_edges(cls, ways, nodes, vertex_nodes):
         """Returns: edge tuples with format `(vertex1, vertex2, edge)`. Each vertex
         is an OSM node id. The `edge` object is a tuple with format `(edge_spec, dist)`,
         where `dist` is the edge distance in meters. `edge_spec` is unique tuple,
@@ -172,11 +179,11 @@ class OSMPathPlanner:
 
         edges = []
 
-        for highway in self.ways.values():
+        for highway in ways.values():
             
-            for j0, j1 in chop(highway.nodes, self.vertex_nodes):
+            for j0, j1 in chop(highway.nodes, vertex_nodes):
                 nds = highway.nodes[j0:j1+1]
-                pts = [self.nodes[nd] for nd in nds]
+                pts = [nodes[nd] for nd in nds]
                 
                 fromv = highway.nodes[j0]
                 tov = highway.nodes[j1]
@@ -190,37 +197,42 @@ class OSMPathPlanner:
 
         return edges
 
+    @classmethod
+    def from_osm(cls, filename, way_filter=None, verbose=False):
+        ways, nodes, vertex_nodes = cls._parse_osm(filename, way_filter, verbose)
+
+        edges = cls._get_edges(ways, nodes, vertex_nodes)
+
+        return cls(nodes, ways, edges)
+
+    def __init__(self, nodes, ways, edges):
+        self.nodes = nodes
+        self.ways = ways
+        self.edges = edges
+
+        self.edge_index = {(a,b):c for a,b,(c,_) in edges}
+
+        edge_weights = [(a, b, c) for (a, b, (_, c)) in edges]
+        self.graph = Graph(edge_weights)
+        self.index = SpatialIndex(list(self.nodes.keys()), 
+                                  list(self.nodes.values()))
+        
     def serialize(self, fn):
-        edges = self._get_edges()
-
-        geoms = {}
-        for way in self.ways.values():
-            pts = np.array([self.nodes[x] for x in way.nodes])
-            pts = (pts*1e7).astype(int)
-            
-            firstrow = pts[0:1,:]
-            diffs = np.diff( pts, axis=0 )
-            geoms[way.id] = np.vstack( [firstrow, diffs] ).tolist()
-
-        vertex_coords = [(k,v) for k,v in self.nodes.items() if k in self.vertex_nodes]
-
         with open(fn,"w") as fp:
-            json.dump({"edges":edges, "geoms":geoms, 'nodes':vertex_coords}, fp)
+            json.dump({"edges":self.edges, 
+                       "nodes":self.nodes, 
+                       'ways':self.ways}, fp, indent=2)
 
     @classmethod
-    def deserialize(self, fn):
+    def deserialize(cls, fn):
         with open(fn) as fp:
             data = json.load(fp)
-            graph = Graph(data["edges"])
-            geoms = data["geoms"]
-            geoms = {k:np.array(v).cumsum(axis=0)/1e7 for k,v in geoms.items()}
             nodes = data["nodes"]
+            ways = data["ways"]
+            edges = data["edges"]
 
-            return geoms, nodes, graph
-
-    def get_graph(self):
-        edges = self._get_edges()
-        return Graph(edges)
+            ret = cls(nodes, ways, edges)
+            return ret
 
 
 if __name__=='__main__':
