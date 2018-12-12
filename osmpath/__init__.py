@@ -83,7 +83,7 @@ class Graph:
         # compress before returning
         self.mat = mat.tocsr()
 
-    def get_shortest_paths(self, origins):
+    def get_shortest_paths(self, origins, verbose=False, chunk=30):
         """
         Args:
             origins (list): List of vertex ids.
@@ -92,7 +92,17 @@ class Graph:
         """
 
         orig_ix = [self.vid_ix[x] for x in origins]
-        _, preds = dijkstra( self.mat, indices=orig_ix, return_predecessors=True)
+
+        # find {chunk} shortest path trees at a time
+        predchunks = []
+        for i in range(0,len(orig_ix),chunk):
+            if verbose==True:
+                print( "finding SPTs %d-%d"%(i,i+chunk) )
+
+            _, preds = dijkstra( self.mat, indices=orig_ix[i:i+chunk], 
+                                 return_predecessors=True)
+            predchunks.append( preds )
+        preds = np.vstack( predchunks )
 
         return ShortestPaths(self, origins, preds)
 
@@ -188,8 +198,12 @@ class OSMPathPlanner:
 
         edge_weights = [(a, b, c) for (a, b, (_, c)) in edges]
         self.graph = Graph(edge_weights)
-        self.index = SpatialIndex(list(self.nodes.keys()), 
-                                  list(self.nodes.values()))
+
+        # only spatially index vertex nodes
+        vids = set([x[0] for x in edge_weights]) | set([x[1] for x in edge_weights])
+        vertex_nodes = {k:v for k,v in self.nodes.items() if k in vids}
+        self.index = SpatialIndex(list(vertex_nodes.keys()), 
+                                  list(vertex_nodes.values()))
         
     def serialize(self, fn):
         with open(fn,"w") as fp:
@@ -214,7 +228,7 @@ class OSMPathPlanner:
             ret.append( self.edge_index[vpair] )
         return ret
 
-    def get_shortest_paths(self, orig, dest):
+    def get_shortest_paths(self, orig, dest, verbose=False):
         # convert locations to vertex ids
         _, orig_vids = self.index.query( orig )
         _, dest_vids = self.index.query( dest )
@@ -222,11 +236,14 @@ class OSMPathPlanner:
         assert len(orig_vids) == len(dest_vids)
 
         unique_orig_vids = list(set(orig_vids))
-        spts = self.graph.get_shortest_paths(unique_orig_vids)
+        spts = self.graph.get_shortest_paths(unique_orig_vids, verbose)
 
         for o, d in zip(orig_vids, dest_vids):
             vertex_path = spts.get_path(o,d)
-            yield self._vertex_pairs_to_edges( vertex_path )
+            if vertex_path is None:
+                yield None
+            else:
+                yield self._vertex_pairs_to_edges( vertex_path )
 
     def get_edge_geom( self, edge ):
         way_id, (ix1, ix2) = edge
