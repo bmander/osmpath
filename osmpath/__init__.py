@@ -6,7 +6,7 @@ import pyproj
 from .util import cons, chop
 import numpy as np
 from scipy.sparse import csr_matrix, dok_matrix
-from scipy.sparse.csgraph import dijkstra
+from scipy.sparse.csgraph import dijkstra, connected_components
 import json
 from scipy.spatial import KDTree
 
@@ -48,6 +48,28 @@ class ShortestPaths:
             path.append( last )
         
         return [self.graph.ix_vid[x] for x in reversed(path)]
+
+def get_largest_connected_component(g):
+    # Find all connected components. We're interested in a strongly connected
+    # component, because in order to consider a place "in the same street grid"
+    # you need to be able to both get there and get away from there.
+    _, comps = connected_components( g.mat, connection="strong" )
+
+    # find the connected component with the most vertices
+    big_comp = np.bincount(comps).argmax()
+    
+    # get index of mostly common connected component, and map to new indices
+    ix = np.nonzero( comps==big_comp )[0]
+    oldix_newix = dict(zip(ix, range(len(ix))))
+
+    # cut down the graph to just the interesting indices, and update the
+    # vertex_ix -> index dictionaries.
+    ret = Graph([])
+    ret.mat = g.mat[:,ix][ix,:]
+    ret.ix_vid = {oldix_newix[k]:v for k,v in g.ix_vid.items() if k in oldix_newix}
+    ret.vid_ix = {v:k for k,v in ret.ix_vid.items()}
+
+    return ret
 
 class Graph:
     def __init__(self, edges):
