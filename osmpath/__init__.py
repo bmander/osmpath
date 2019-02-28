@@ -60,16 +60,15 @@ def get_largest_connected_component(g):
     
     # get index of mostly common connected component, and map to new indices
     ix = np.nonzero( comps==big_comp )[0]
-    oldix_newix = dict(zip(ix, range(len(ix))))
 
     # cut down the graph to just the interesting indices, and update the
     # vertex_ix -> index dictionaries.
     ret = Graph([])
     ret.mat = g.mat[:,ix][ix,:]
-    ret.ix_vid = {oldix_newix[k]:v for k,v in g.ix_vid.items() if k in oldix_newix}
-    ret.vid_ix = {v:k for k,v in ret.ix_vid.items()}
+    ret.ix_vid = [g.ix_vid[i] for i in ix]
+    ret.vid_ix = dict(zip(ret.ix_vid, range(len(ret.ix_vid))))
 
-    return ret
+    return ix, ret
 
 class Graph:
     def __init__(self, edges):
@@ -92,7 +91,7 @@ class Graph:
         vertex_ids = sorted(list( set(orig) | set(dest) ))
 
         self.vid_ix = dict(zip(vertex_ids, range(len(vertex_ids))))
-        self.ix_vid = {v:k for k,v in self.vid_ix.items()}
+        self.ix_vid = vertex_ids
 
         ii = [self.vid_ix[vid] for vid in orig]
         jj = [self.vid_ix[vid] for vid in dest]
@@ -226,7 +225,21 @@ class OSMPathPlanner:
         vertex_nodes = {k:v for k,v in self.nodes.items() if k in vids}
         self.index = SpatialIndex(list(vertex_nodes.keys()), 
                                   list(vertex_nodes.values()))
-        
+
+    def simplify(self):
+        """Reduce to single largest connected component"""
+
+        _, g = get_largest_connected_component(self.graph)
+        node_ids = set( g.ix_vid )
+
+        new_nodes = {node_id:coord for node_id,coord in self.nodes.items() if node_id in node_ids}
+        new_edges = [(fromv, tov, edgeinfo) for fromv, tov, edgeinfo in self.edges if fromv in node_ids and tov in node_ids]
+
+        new_way_ids = set( [way_id for (_, _, ((way_id, _), _)) in new_edges] )
+        new_ways = {k:v for k,v in self.ways.items() if k in new_way_ids}
+
+        return OSMPathPlanner(new_nodes, new_ways, new_edges)
+
     def serialize(self, fn):
         with open(fn,"w") as fp:
             json.dump({"edges":self.edges, 
