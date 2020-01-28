@@ -12,7 +12,7 @@ setuptools.setup(
 
     packages=setuptools.find_packages(),
 
-    install_requires=["osmread","numpy","scipy","pyproj"],
+    install_requires=["osmium","numpy","scipy","pyproj"],
 
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',

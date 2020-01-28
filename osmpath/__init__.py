@@ -1,7 +1,7 @@
 """osmpath - Shortest paths using OpenStreetMap."""
 
-from osmread import parse_file, Way, Node
-from collections import Counter
+import osmium
+from collections import Counter, namedtuple
 import pyproj
 from .util import cons, chop
 import numpy as np
@@ -15,6 +15,8 @@ __author__ = 'Brandon Martin-Anderson <badhill@gmail.com>'
 __all__ = []
 
 geod = pyproj.Geod(ellps='clrk66')
+
+Way = namedtuple('Way', ['id','nodes','tags'])
 
 def is_oneway(way):
     return way.tags.get("oneway") in {"yes","true","1"}
@@ -148,22 +150,42 @@ class OSMPathPlanner:
         nodes = {}
         ways = {}
 
-        for i, entity in enumerate( parse_file(filename) ):
-            if verbose:
-                if i%100000==0:
-                    print( "{} entities read".format(i) )
-            
-            if isinstance( entity, Node ):
-                nodes[ entity.id ] = (entity.lon, entity.lat)
-            elif isinstance( entity, Way ):
-                if way_filter and not way_filter(entity):
-                    continue
-                    
-                ways[ entity.id ] = entity
-                referenced_nodes.update( entity.nodes )
+        class RoadHandler(osmium.SimpleHandler):
+            def __init__(self):
+                osmium.SimpleHandler.__init__(self)
+                self.n_nodes = 0
+                self.n_ways = 0
+                
+            def node(self, n):
+                self.n_nodes += 1
+                self._report()
 
-                vertex_nodes.add( entity.nodes[0] )
-                vertex_nodes.add( entity.nodes[-1] )
+                nodes[ int(n.id) ] = (n.location.lon, n.location.lat)
+
+            def way(self, w):
+                if way_filter and not way_filter(w):
+                    return
+
+                self.n_ways += 1
+                self._report()
+
+                nodes = [int(n.ref) for n in w.nodes]
+
+                ways[ int(w.id) ] = Way(int(w.id), nodes, dict(w.tags))
+
+                referenced_nodes.update( nodes )
+
+                vertex_nodes.add( nodes[0] )
+                vertex_nodes.add( nodes[-1] )
+
+            def _report(self, override=False):
+                if override or (self.n_nodes+self.n_ways)%100000==0:
+                    print( "{} nodes, {} ways read".format(self.n_nodes, self.n_ways) )
+
+
+        h = RoadHandler()
+        h.apply_file(filename)
+        h._report(override=True)
 
         # filter nodes to those referenced by a way
         nodes = {ndid:node for ndid,node in nodes.items() if ndid in referenced_nodes}
