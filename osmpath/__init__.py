@@ -206,13 +206,15 @@ class OSMPathPlanner:
             
             for j0, j1 in chop(highway.nodes, vertex_nodes):
                 nds = highway.nodes[j0:j1+1]
-                pts = [nodes[nd] for nd in nds]
                 
                 fromv = highway.nodes[j0]
                 tov = highway.nodes[j1]
-                seglen = geo_len(pts)
+
                 edge_id_forward = (highway.id,(j0,j1))
                 edge_id_backward = (highway.id,(j1,j0))
+
+                pts = [nodes[nd] for nd in nds]
+                seglen = geo_len(pts)
                 
                 edges.append( Edge(fromv, tov, EdgeInfo(edge_id_forward, seglen) ) )
                 if not is_oneway(highway):
