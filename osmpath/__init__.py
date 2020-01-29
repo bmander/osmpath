@@ -17,6 +17,7 @@ __all__ = []
 geod = pyproj.Geod(ellps='clrk66')
 
 Way = namedtuple('Way', ['id','nodes','tags'])
+Edge = namedtuple('Edge', ['orig', 'dest', 'edgeinfo'])
 
 def is_oneway(way):
     return way.tags.get("oneway") in {"yes","true","1"}
@@ -217,9 +218,9 @@ class OSMPathPlanner:
                 edge_id_forward = (highway.id,(j0,j1))
                 edge_id_backward = (highway.id,(j1,j0))
                 
-                edges.append( (fromv, tov, (edge_id_forward, seglen) ) )
+                edges.append( Edge(fromv, tov, (edge_id_forward, seglen) ) )
                 if not is_oneway(highway):
-                    edges.append( (tov, fromv, (edge_id_backward, seglen) ) )
+                    edges.append( Edge(tov, fromv, (edge_id_backward, seglen) ) )
 
         return edges
 
@@ -237,9 +238,9 @@ class OSMPathPlanner:
         self.ways = {int(k):Way(*v) for k,v in ways.items()}
         self.edges = edges
 
-        self.edge_index = {(a,b):c for a,b,(c,_) in edges}
+        self.edge_index = {(e.orig,e.dest):e.edgeinfo[0] for e in edges}
 
-        edge_weights = [(a, b, c) for (a, b, (_, c)) in edges]
+        edge_weights = [(e.orig, e.dest, e.edgeinfo[1]) for e in edges]
         self.graph = Graph(edge_weights)
 
         # only spatially index vertex nodes
@@ -255,7 +256,7 @@ class OSMPathPlanner:
         node_ids = set( g.ix_vid )
 
         new_nodes = {node_id:coord for node_id,coord in self.nodes.items() if node_id in node_ids}
-        new_edges = [(fromv, tov, edgeinfo) for fromv, tov, edgeinfo in self.edges if fromv in node_ids and tov in node_ids]
+        new_edges = [(e.orig, e.dest, e.edgeinfo) for e in self.edges if e.orig in node_ids and e.dest in node_ids]
 
         new_way_ids = set( [way_id for (_, _, ((way_id, _), _)) in new_edges] )
         new_ways = {k:v for k,v in self.ways.items() if k in new_way_ids}
