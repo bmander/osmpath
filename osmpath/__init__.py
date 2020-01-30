@@ -222,6 +222,7 @@ class OSMPathPlanner:
 
     @classmethod
     def _parse_osm(cls, filename, way_filter=None, verbose=False):
+        #TODO use the OSMDataset implementation
         referenced_nodes = Counter()
 
         # while we're parsing the file, it's easy to keep track of the OSM
