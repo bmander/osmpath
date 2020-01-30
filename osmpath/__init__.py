@@ -17,6 +17,7 @@ __all__ = []
 geod = pyproj.Geod(ellps='clrk66')
 
 Way = namedtuple('Way', ['id','nodes','tags'])
+StreetSegment = namedtuple('StreetSegment', ['id','fromv','tov','path','tags'])
 Edge = namedtuple('Edge', ['orig', 'dest', 'edgeinfo'])
 EdgeInfo = namedtuple('EdgeInfo', ['spec', 'weight'])
 
@@ -139,6 +140,83 @@ class SpatialIndex:
     def query(self, points):
         dists, ix = self.tree.query( points )
         return dists, [self.ix_id[x] for x in ix]
+
+class OSMDataset:
+    def __init__(self, filename):
+        self._filename = filename
+        self._ways = None
+        self._nodes = None
+        self._vertex_nodes = None
+
+    def parse(self, way_filter=None, verbose=False):
+        referenced_nodes = Counter()
+
+        # while we're parsing the file, it's easy to keep track of the OSM
+        # nodes that correspond to graph vertices
+        vertex_nodes = set()
+        nodes = {}
+        ways = {}
+
+        class RoadHandler(osmium.SimpleHandler):
+            def __init__(self):
+                osmium.SimpleHandler.__init__(self)
+                self.n_nodes = 0
+                self.n_ways = 0
+                
+            def node(self, n):
+                self.n_nodes += 1
+                self._report()
+
+                nodes[ int(n.id) ] = (n.location.lon, n.location.lat)
+
+            def way(self, w):
+                if way_filter and not way_filter(w):
+                    return
+
+                self.n_ways += 1
+                self._report()
+
+                nodes = [int(n.ref) for n in w.nodes]
+
+                ways[ int(w.id) ] = Way(int(w.id), nodes, dict(w.tags))
+
+                referenced_nodes.update( nodes )
+
+                vertex_nodes.add( nodes[0] )
+                vertex_nodes.add( nodes[-1] )
+
+            def _report(self, override=False):
+                if override or (self.n_nodes+self.n_ways)%100000==0:
+                    print( "{} nodes, {} ways read".format(self.n_nodes, self.n_ways) )
+
+
+        h = RoadHandler()
+        h.apply_file(self._filename)
+        h._report(override=True)
+
+        # filter nodes to those referenced by a way
+        nodes = {ndid:node for ndid,node in nodes.items() if ndid in referenced_nodes}
+
+        vertex_nodes.update( [nd for nd,ct in referenced_nodes.items() if ct>1] )
+
+        self._ways = ways
+        self._nodes = nodes
+        self._vertex_nodes = vertex_nodes
+
+    def get_street_segments(self):
+
+        for highway in self._ways.values():
+            
+            for j0, j1 in chop(highway.nodes, self._vertex_nodes):
+                nds = highway.nodes[j0:j1+1]
+                
+                fromv = highway.nodes[j0]
+                tov = highway.nodes[j1]
+
+                pts = [self._nodes[nd] for nd in nds]
+                
+                yield StreetSegment(highway.id, fromv, tov, pts, highway.tags)
+
 
 class OSMPathPlanner:
 
