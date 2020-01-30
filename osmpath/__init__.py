@@ -197,7 +197,7 @@ class OSMPathPlanner:
         return ways, nodes, vertex_nodes
 
     @classmethod
-    def _get_edges(cls, ways, nodes, vertex_nodes):
+    def _get_edges(cls, ways, nodes, vertex_nodes, weight_func):
         """Returns: List of Edge objects."""
 
         edges = []
@@ -214,19 +214,19 @@ class OSMPathPlanner:
                 edge_id_backward = (highway.id,(j1,j0))
 
                 pts = [nodes[nd] for nd in nds]
-                seglen = geo_len(pts)
+                weight = weight_func(pts)
                 
-                edges.append( Edge(fromv, tov, EdgeInfo(edge_id_forward, seglen) ) )
+                edges.append( Edge(fromv, tov, EdgeInfo(edge_id_forward, weight) ) )
                 if not is_oneway(highway):
-                    edges.append( Edge(tov, fromv, EdgeInfo(edge_id_backward, seglen) ) )
+                    edges.append( Edge(tov, fromv, EdgeInfo(edge_id_backward, weight) ) )
 
         return edges
 
     @classmethod
-    def from_osm(cls, filename, way_filter=None, verbose=False):
+    def from_osm(cls, filename, way_filter=None, verbose=False, weight_func=geo_len):
         ways, nodes, vertex_nodes = cls._parse_osm(filename, way_filter, verbose)
 
-        edges = cls._get_edges(ways, nodes, vertex_nodes)
+        edges = cls._get_edges(ways, nodes, vertex_nodes, weight_func=weight_func)
 
         return cls(nodes, ways, edges)
 
